@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: stcli
+Version: 1.0.0
+Summary: A beautiful CLI for Syncthing
+Requires-Python: >=3.11
+Requires-Dist: click>=8.1
+Requires-Dist: requests>=2.31
+Requires-Dist: rich>=13.7
+Requires-Dist: urllib3>=2.0

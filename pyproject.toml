@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stcli"
+version = "1.0.0"
+description = "A beautiful CLI for Syncthing"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "requests>=2.31",
+    "rich>=13.7",
+    "urllib3>=2.0",
+]
+
+[project.scripts]
+stcli = "stcli.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stcli*"]
