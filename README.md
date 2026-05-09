@@ -4,7 +4,7 @@ A beautiful, batteries-included command-line interface for [Syncthing](https://s
 
 ```
 ╔══════════════════════════════╗
-║   stcli  –  Syncthing CLI   ║
+║   stcli  –  Syncthing CLI    ║
 ╚══════════════════════════════╝
 ```
 
@@ -20,11 +20,23 @@ A beautiful, batteries-included command-line interface for [Syncthing](https://s
 
 ## Install
 
+### Arch Linux (AUR)
+
 ```bash
-pip install -e .
-# or to install globally:
-pip install -e . --break-system-packages
+yay -S stcli
 ```
+
+### Python (pip)
+
+To install directly from GitHub without cloning the repository manually:
+
+```bash
+pip install git+https://github.com/anshumansingh0010/syncthing-cli.git
+# or to install globally/system-wide:
+pip install git+https://github.com/anshumansingh0010/syncthing-cli.git --break-system-packages
+```
+
+*(If you have already cloned the repository locally, you can simply run `pip install .` from inside the folder).*
 
 `stcli` is placed in `~/.local/bin/stcli`. Add that to your `$PATH` if needed.
 
