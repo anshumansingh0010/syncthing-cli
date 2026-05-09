@@ -63,7 +63,7 @@ def cli(ctx, profile_name, host, port, api_key, tls):
     """
     \b
     ╔══════════════════════════════╗
-    ║   stcli  –  Syncthing CLI   ║
+    ║   stcli  –  Syncthing CLI    ║
     ╚══════════════════════════════╝
 
     Manage your Syncthing instance from the terminal.
