@@ -1,7 +1,7 @@
 # Maintainer: Anshuman Singh <anshumansingh0010@gmail.com>
 
 pkgname=stcli
-pkgver=1.1.1
+pkgver=1.1.2
 pkgrel=1
 pkgdesc="A beautiful CLI for Syncthing"
 arch=('any')
@@ -22,7 +22,7 @@ makedepends=(
 )
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('c86899e082e72ae8044f05e90845ef5c8f235e594a92196c72172245eb4a8e10')
+sha256sums=('9965b6d334ebbc01a1f7a0cc5e1ed2d87099664f033472ba4ff8a3e69e43f27e')
 
 build() {
     cd "syncthing-cli-$pkgver"

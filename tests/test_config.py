@@ -67,10 +67,14 @@ def test_profile_persistence(tmp_path, monkeypatch):
     assert "home" in loaded
     assert loaded["home"].api_key == "k1"
 
-    assert get_profile("home").host == "1.1.1.1"
+    profile = get_profile("home")
+    assert profile is not None
+    assert profile.host == "1.1.1.1"
 
     assert set_default_profile("home") is True
-    assert get_profile("default").api_key == "k1"
+    default_profile = get_profile("default")
+    assert default_profile is not None
+    assert default_profile.api_key == "k1"
 
     assert delete_profile("home") is True
     assert get_profile("home") is None

@@ -173,6 +173,50 @@ def test_system_commands(mock_client):
         assert "Active facilities" in res3.output
 
 
+def test_system_start_already_running(mock_client):
+    runner = CliRunner()
+    mock_client.system_ping.return_value = True
+    with patch("stcli.cli._build_client", return_value=mock_client):
+        res = runner.invoke(cli, ["system", "start"])
+        assert res.exit_code == 0
+        assert "already running" in res.output
+
+
+def test_system_start_systemd(mock_client):
+    runner = CliRunner()
+    mock_client.system_ping.side_effect = [False, True]
+    with patch("stcli.cli._build_client", return_value=mock_client), \
+         patch("shutil.which", return_value="/usr/bin/systemctl"), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        res = runner.invoke(cli, ["system", "start", "--no-wait"])
+        assert res.exit_code == 0
+        assert "systemd user service" in res.output
+
+
+def test_system_start_process(mock_client):
+    runner = CliRunner()
+    mock_client.system_ping.side_effect = [False, True]
+    with patch("stcli.cli._build_client", return_value=mock_client), \
+         patch("shutil.which", side_effect=lambda bin: None if bin == "systemctl" else "/usr/bin/syncthing"), \
+         patch("subprocess.Popen") as mock_popen:
+        res = runner.invoke(cli, ["system", "start", "-m", "auto", "--no-wait"])
+        assert res.exit_code == 0
+        assert "syncthing process" in res.output
+        mock_popen.assert_called_once()
+
+
+def test_system_stop(mock_client):
+    runner = CliRunner()
+    with patch("stcli.cli._build_client", return_value=mock_client):
+        res = runner.invoke(cli, ["system", "stop", "-y"])
+        assert res.exit_code == 0
+        assert "stop request" in res.output
+        mock_client.system_shutdown.assert_called_once()
+
+
+
+
 def test_pending_list(mock_client):
     runner = CliRunner()
     with patch("stcli.cli._build_client", return_value=mock_client):
@@ -197,3 +241,37 @@ def test_connect_list_and_show(tmp_path, monkeypatch):
     res2 = runner.invoke(cli, ["connect", "show", "testprof"])
     assert res2.exit_code == 0
     assert "testprof" in res2.output
+
+
+def test_fmt_bytes_helpers():
+    from stcli.output import fmt_bytes, fmt_pct, folder_state_style
+    assert fmt_bytes(None) == "0 B"
+    assert fmt_bytes(0) == "0 B"
+    assert fmt_bytes(500) == "500 B"
+    assert fmt_bytes(2048) == "2.0 KB"
+
+    assert fmt_pct(None) == "[warn]0.0%[/warn]"
+    assert folder_state_style(None, False) == "[unknown]? unknown[/unknown]"
+
+
+def test_system_start_offline_fallback():
+    runner = CliRunner()
+    with patch("stcli.cli._build_client", side_effect=SystemExit(1)), \
+         patch("shutil.which", side_effect=lambda bin: None if bin == "systemctl" else "/usr/bin/syncthing"), \
+         patch("subprocess.Popen") as mock_popen:
+        res = runner.invoke(cli, ["system", "start", "--no-wait"])
+        assert res.exit_code == 0
+        assert "syncthing process" in res.output
+        mock_popen.assert_called_once()
+
+
+def test_dismiss_pending_folder_prefix(mock_client):
+    runner = CliRunner()
+    mock_client.pending_folders.return_value = {
+        "photos-12345": {"offeredBy": {"DEV1": {}}, "label": "Photos"}
+    }
+    with patch("stcli.cli._build_client", return_value=mock_client):
+        res = runner.invoke(cli, ["pending", "dismiss", "folder", "photos", "--from", "DEV1"])
+        assert res.exit_code == 0
+        mock_client.dismiss_pending_folder.assert_called_with("photos-12345", "DEV1-ABCDEFG-1234567-8901234")
+

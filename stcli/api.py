@@ -36,7 +36,10 @@ class SyncthingClient:
         try:
             resp = self._session.get(self._url(path), params=params, verify=self._verify, timeout=10)
             self._raise(resp)
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                return resp.text
         except requests.exceptions.RequestException as e:
             raise SyncthingError(
                 f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
@@ -47,7 +50,12 @@ class SyncthingClient:
             resp = self._session.post(self._url(path), json=json_body, params=params,
                                       verify=self._verify, timeout=10)
             self._raise(resp)
-            return resp.json() if resp.text else {}
+            if not resp.text:
+                return {}
+            try:
+                return resp.json()
+            except Exception:
+                return {"result": resp.text}
         except requests.exceptions.RequestException as e:
             raise SyncthingError(
                 f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
@@ -57,7 +65,12 @@ class SyncthingClient:
         try:
             resp = self._session.patch(self._url(path), json=json_body, verify=self._verify, timeout=10)
             self._raise(resp)
-            return resp.json() if resp.text else {}
+            if not resp.text:
+                return {}
+            try:
+                return resp.json()
+            except Exception:
+                return {"result": resp.text}
         except requests.exceptions.RequestException as e:
             raise SyncthingError(
                 f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
@@ -67,7 +80,12 @@ class SyncthingClient:
         try:
             resp = self._session.put(self._url(path), json=json_body, verify=self._verify, timeout=10)
             self._raise(resp)
-            return resp.json() if resp.text else {}
+            if not resp.text:
+                return {}
+            try:
+                return resp.json()
+            except Exception:
+                return {"result": resp.text}
         except requests.exceptions.RequestException as e:
             raise SyncthingError(
                 f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
@@ -77,7 +95,12 @@ class SyncthingClient:
         try:
             resp = self._session.delete(self._url(path), params=params, verify=self._verify, timeout=10)
             self._raise(resp)
-            return resp.json() if resp.text else {}
+            if not resp.text:
+                return {}
+            try:
+                return resp.json()
+            except Exception:
+                return {"result": resp.text}
         except requests.exceptions.RequestException as e:
             raise SyncthingError(
                 f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"

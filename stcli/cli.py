@@ -19,6 +19,10 @@ from stcli.commands.watch   import watch_cmd, events_cmd
 class ExceptionHandlingGroup(click.Group):
     """Custom Click Group that handles connection errors and API exceptions gracefully."""
 
+    def parse_args(self, ctx, args):
+        setattr(ctx, "raw_args", list(args))
+        return super().parse_args(ctx, args)
+
     def invoke(self, ctx):
         try:
             return super().invoke(ctx)
@@ -32,7 +36,8 @@ class ExceptionHandlingGroup(click.Group):
                 if "Could not connect" in msg or "Connection refused" in msg or "Max retries exceeded" in msg:
                     console.print(
                         "\n[muted]Tips:\n"
-                        " • Check if Syncthing is running: [bold]systemctl --user status syncthing[/bold] or run [bold]syncthing[/bold]\n"
+                        " • Start Syncthing: [bold]stcli system start[/bold]\n"
+                        " • Check status: [bold]systemctl --user status syncthing[/bold]\n"
                         " • Test connectivity: [bold]stcli connect test[/bold]\n"
                         " • Auto-detect connection: [bold]stcli connect auto[/bold][/muted]"
                     )
@@ -137,13 +142,22 @@ def cli(ctx, profile_name, host, port, api_key, tls, json_output):
     if ctx.invoked_subcommand in ("connect", None):
         return
 
+    raw_args = getattr(ctx, "raw_args", [])
+    is_start_or_stop = ctx.invoked_subcommand == "system" and any(a in raw_args for a in ("start", "stop"))
+
     try:
         client = _build_client(ctx, profile_name, host, port, api_key, tls)
     except SystemExit:
-        raise
+        if is_start_or_stop:
+            client = None
+        else:
+            raise
     except Exception as e:
-        console.print(f"[error]Failed to initialise client: {e}[/error]")
-        raise SystemExit(1)
+        if is_start_or_stop:
+            client = None
+        else:
+            console.print(f"[error]Failed to initialise client: {e}[/error]")
+            raise SystemExit(1)
 
     ctx.obj = client
 

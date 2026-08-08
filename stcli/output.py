@@ -2,6 +2,8 @@
 Shared Rich helpers — console, theme, and utility renderers.
 """
 
+from typing import Any
+
 from rich.console import Console
 from rich.theme import Theme
 
@@ -27,16 +29,22 @@ THEME = Theme({
 console = Console(theme=THEME)
 
 
-def fmt_bytes(n: int) -> str:
+def fmt_bytes(n: int | float | None) -> str:
     """Human-readable byte count."""
+    if n is None:
+        n = 0
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if abs(n) < 1024:
+            if unit == "B":
+                return f"{int(n)} B"
             return f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} PB"
 
 
-def fmt_pct(completed: float) -> str:
+def fmt_pct(completed: float | None) -> str:
+    if completed is None:
+        completed = 0.0
     pct = round(completed, 1)
     if pct >= 100:
         return "[synced]100%[/synced]"
@@ -45,9 +53,11 @@ def fmt_pct(completed: float) -> str:
     return f"[warn]{pct}%[/warn]"
 
 
-def folder_state_style(state: str, paused: bool) -> str:
+def folder_state_style(state: str | None, paused: bool) -> str:
     if paused:
         return "[paused]⏸ paused[/paused]"
+    if not state:
+        state = "unknown"
     mapping = {
         "idle":     "[synced]✓ synced[/synced]",
         "syncing":  "[syncing]⟳ syncing[/syncing]",
@@ -70,7 +80,7 @@ def device_state_style(connected: bool, paused: bool) -> str:
     return "[muted]○ disconnected[/muted]"
 
 
-def print_json(data: any) -> None:
+def print_json(data: Any) -> None:
     """Print structured data as pretty JSON."""
     import json
     console.print_json(json.dumps(data, default=str))

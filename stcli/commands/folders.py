@@ -108,13 +108,13 @@ def folder_info(ctx, folder_id):
         f"[label]State    :[/label] {folder_state_style(state, paused)}",
         f"[label]Sync     :[/label] {fmt_pct(pct)}",
         "",
-        f"[label]Local files  :[/label] [number]{status.get('localFiles', 0):,}[/number]"
-        f"  [label]dirs:[/label] [number]{status.get('localDirectories', 0):,}[/number]"
+        f"[label]Local files  :[/label] [number]{(status.get('localFiles') or 0):,}[/number]"
+        f"  [label]dirs:[/label] [number]{(status.get('localDirectories') or 0):,}[/number]"
         f"  [label]size:[/label] [number]{fmt_bytes(status.get('localBytes', 0))}[/number]",
-        f"[label]Global files :[/label] [number]{status.get('globalFiles', 0):,}[/number]"
-        f"  [label]dirs:[/label] [number]{status.get('globalDirectories', 0):,}[/number]"
+        f"[label]Global files :[/label] [number]{(status.get('globalFiles') or 0):,}[/number]"
+        f"  [label]dirs:[/label] [number]{(status.get('globalDirectories') or 0):,}[/number]"
         f"  [label]size:[/label] [number]{fmt_bytes(status.get('globalBytes', 0))}[/number]",
-        f"[label]Need files   :[/label] [number]{status.get('needFiles', 0):,}[/number]"
+        f"[label]Need files   :[/label] [number]{(status.get('needFiles') or 0):,}[/number]"
         f"  [label]bytes:[/label] [number]{fmt_bytes(status.get('needBytes', 0))}[/number]",
     ]
 
@@ -323,7 +323,7 @@ def folder_errors(ctx, folder_id):
 
 
 @folders_group.command("add")
-@click.argument("path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.argument("path", type=click.Path(file_okay=False, resolve_path=True))
 @click.option("--id",      "folder_id", default=None,
               help="Folder ID (auto-generated from path basename if omitted).")
 @click.option("--label",   default=None, help="Human-readable label.")
@@ -348,10 +348,17 @@ def folder_add(client, path, folder_id, label, folder_type, rescan, device_ids):
         label = os.path.basename(path.rstrip("/"))
 
     my_id = client.system_status().get("myID", "")
-    devices = [{"deviceID": my_id}]
+    seen_devs = set()
+    devices = []
+    if my_id:
+        devices.append({"deviceID": my_id})
+        seen_devs.add(my_id)
     for did in device_ids:
         dev = resolve_device(client, did)
-        devices.append({"deviceID": dev["deviceID"]})
+        dev_id = dev["deviceID"]
+        if dev_id not in seen_devs:
+            devices.append({"deviceID": dev_id})
+            seen_devs.add(dev_id)
 
     folder_cfg = {
         "id":            folder_id,

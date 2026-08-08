@@ -20,13 +20,14 @@ def watch_cmd(client, interval):
 
     Press Ctrl+C to exit.
     """
-    def generate_dashboard() -> Panel:
+    def generate_dashboard() -> Layout | Panel:
         try:
             sys_status  = client.system_status()
             sys_version = client.system_version()
             folders     = client.folders()
             devices     = client.devices()
-            connections = client.system_connections().get("connections", {})
+            conns_resp  = client.system_connections()
+            connections = (conns_resp.get("connections") if isinstance(conns_resp, dict) else {}) or {}
         except Exception as e:
             return Panel(f"[error]Error polling Syncthing: {e}[/error]", title="[error]Connection Error[/error]")
 
@@ -86,6 +87,9 @@ def watch_cmd(client, interval):
             Layout(dtable, name="devices"),
         )
         return layout
+
+    if interval <= 0:
+        interval = 1.0
 
     console.print("[info]Starting live dashboard (press Ctrl+C to stop)…[/info]")
     try:

@@ -81,6 +81,7 @@ stcli devices info J4U5N7
 stcli devices ping laptop
 
 # System management
+stcli system start
 stcli system info
 stcli system logs -n 50
 stcli system rescan
@@ -111,6 +112,7 @@ stcli system rescan
 | `stcli devices ping <id>` | Check device connection details & crypto |
 | `stcli devices pause/resume` | Pause or resume device syncing |
 | `stcli devices remove <id>` | Remove device configuration |
+| `stcli system start` | Start the local Syncthing service (systemd or process) |
 | `stcli system info` | Show detailed server & memory metrics |
 | `stcli system rescan` | Rescan all folders (or specific subfolder) |
 | `stcli system restart/shutdown` | Restart or shutdown Syncthing service |

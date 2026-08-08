@@ -1,5 +1,8 @@
-"""stcli – system commands (info, rescan, restart, shutdown, logs, debug)."""
+"""stcli – system commands (info, start, rescan, restart, shutdown, logs, debug)."""
 
+import shutil
+import subprocess
+import time
 import click
 from rich.table import Table
 from rich.panel import Panel
@@ -12,7 +15,8 @@ from stcli.api import SyncthingError
 
 @click.group("system")
 def system_group():
-    """System operations: info, rescan, restart, shutdown, logs, debug."""
+    """System operations: info, start, rescan, restart, shutdown, logs, debug."""
+
 
 
 @system_group.command("info")
@@ -62,6 +66,126 @@ def system_info(ctx):
         border_style="cyan",
         expand=False,
     ))
+
+
+@system_group.command("start")
+@click.option(
+    "--method",
+    "-m",
+    type=click.Choice(["auto", "systemd", "process"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Method to start Syncthing (systemd user service or direct process).",
+)
+@click.option(
+    "--no-browser/--browser",
+    default=True,
+    show_default=True,
+    help="Pass --no-browser flag when launching syncthing executable directly.",
+)
+@click.option(
+    "--wait/--no-wait",
+    default=True,
+    show_default=True,
+    help="Wait for Syncthing to respond to API requests.",
+)
+@click.option(
+    "--timeout",
+    default=10,
+    type=int,
+    show_default=True,
+    help="Timeout in seconds to wait for Syncthing API to become ready.",
+)
+@click.pass_context
+def system_start(ctx, method, no_browser, wait, timeout):
+    """Start the local Syncthing service."""
+    client = ctx.obj
+
+    # Check if Syncthing is already running
+    if client:
+        try:
+            if client.system_ping():
+                console.print("[good]✓ Syncthing is already running.[/good]")
+                return
+        except Exception:
+            pass
+
+    started_via = None
+
+    # Try systemd user service
+    if method in ("auto", "systemd"):
+        if shutil.which("systemctl"):
+            res = subprocess.run(
+                ["systemctl", "--user", "start", "syncthing"],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0:
+                started_via = "systemd user service"
+            elif method == "systemd":
+                err_msg = res.stderr.strip() or "systemctl returned non-zero status"
+                console.print(f"[error]✗ Failed to start via systemctl: {err_msg}[/error]")
+                raise SystemExit(1)
+        elif method == "systemd":
+            console.print("[error]✗ 'systemctl' command not found.[/error]")
+            raise SystemExit(1)
+
+    # Try direct process launch if systemd didn't start it
+    if not started_via and method in ("auto", "process"):
+        syncthing_bin = shutil.which("syncthing")
+        if syncthing_bin:
+            cmd = [syncthing_bin]
+            if no_browser:
+                cmd.append("--no-browser")
+            try:
+                subprocess.Popen(
+                    cmd,
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                started_via = "syncthing process"
+            except Exception as e:
+                console.print(f"[error]✗ Failed to launch syncthing executable: {e}[/error]")
+                raise SystemExit(1)
+        else:
+            if method == "process":
+                console.print("[error]✗ 'syncthing' executable not found in PATH.[/error]")
+            else:
+                console.print(
+                    "[error]✗ Could not start Syncthing. Neither 'systemctl' user service nor 'syncthing' executable was found.[/error]"
+                )
+            raise SystemExit(1)
+
+    console.print(f"[good]✓ Initiated Syncthing start via {started_via}.[/good]")
+
+    if wait:
+        console.print("[muted]Waiting for Syncthing API to become ready...[/muted]")
+        start_time = time.time()
+        ready = False
+        while time.time() - start_time < timeout:
+            if not client:
+                try:
+                    from stcli.config import detect_profile
+                    from stcli.api import SyncthingClient
+                    p = detect_profile()
+                    if p:
+                        client = SyncthingClient(p)
+                except Exception:
+                    pass
+            if client:
+                try:
+                    if client.system_ping():
+                        ready = True
+                        break
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
+        if ready:
+            console.print("[good]✓ Syncthing is up and responding![/good]")
+        else:
+            console.print(f"[warning]⚠ Syncthing started, but API did not respond within {timeout} seconds.[/warning]")
 
 
 @system_group.command("rescan")
@@ -120,6 +244,40 @@ def system_shutdown(client, yes):
         console.print("[good]✓ Sent shutdown request to Syncthing.[/good]")
     except SyncthingError as e:
         console.print(f"[error]✗ Failed to shutdown: {e}[/error]")
+        raise SystemExit(1)
+
+
+@system_group.command("stop")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
+@click.pass_context
+def system_stop(ctx, yes):
+    """Stop the Syncthing service."""
+    if not yes:
+        click.confirm("Are you sure you want to stop Syncthing?", abort=True)
+
+    client = ctx.obj
+    stopped = False
+
+    if client:
+        try:
+            client.system_shutdown()
+            stopped = True
+        except Exception:
+            pass
+
+    if not stopped and shutil.which("systemctl"):
+        res = subprocess.run(
+            ["systemctl", "--user", "stop", "syncthing"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0:
+            stopped = True
+
+    if stopped:
+        console.print("[good]✓ Sent stop request to Syncthing.[/good]")
+    else:
+        console.print("[error]✗ Failed to stop Syncthing (service may already be stopped).[/error]")
         raise SystemExit(1)
 
 

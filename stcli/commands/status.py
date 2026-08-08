@@ -21,7 +21,7 @@ def status_cmd(ctx):
     folders      = client.folders()
     devices      = client.devices()
     conns_resp   = client.system_connections()
-    connections  = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    connections  = (conns_resp.get("connections") if isinstance(conns_resp, dict) else {}) or {}
 
     if json_out:
         print_json({

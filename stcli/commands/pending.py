@@ -249,6 +249,16 @@ def dismiss_device(client, device_id):
 @click.pass_obj
 def dismiss_folder(client, folder_id, from_device):
     """Dismiss a pending folder offer."""
+    pend = client.pending_folders()
+    matches = {fid: info for fid, info in pend.items() if fid.lower().startswith(folder_id.lower())}
+    if matches:
+        if len(matches) > 1:
+            console.print(f"[warn]Ambiguous prefix – matched {len(matches)} pending folders.[/warn]")
+            raise SystemExit(1)
+        full_fid = next(iter(matches.keys()))
+    else:
+        full_fid = folder_id
+
     try:
         dev = resolve_device(client, from_device)
         full_from = dev["deviceID"]
@@ -256,8 +266,8 @@ def dismiss_folder(client, folder_id, from_device):
         full_from = from_device
 
     try:
-        client.dismiss_pending_folder(folder_id, full_from)
-        console.print(f"[muted]✓ Dismissed folder [id]{folder_id}[/id] from [id]{_short(full_from)}[/id][/muted]")
+        client.dismiss_pending_folder(full_fid, full_from)
+        console.print(f"[muted]✓ Dismissed folder [id]{full_fid}[/id] from [id]{_short(full_from)}[/id][/muted]")
     except SyncthingError as e:
         console.print(f"[error]✗ Failed to dismiss folder: {e}[/error]")
         raise SystemExit(1)

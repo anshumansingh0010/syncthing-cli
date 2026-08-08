@@ -1,6 +1,6 @@
 pkgbase = stcli
 	pkgdesc = A beautiful CLI for Syncthing
-	pkgver = 1.1.1
+	pkgver = 1.1.2
 	pkgrel = 1
 	url = https://github.com/anshumansingh0010/syncthing-cli
 	arch = any
@@ -14,7 +14,7 @@ pkgbase = stcli
 	depends = python-requests
 	depends = python-rich
 	depends = python-urllib3
-	source = stcli-1.1.1.tar.gz::https://github.com/anshumansingh0010/syncthing-cli/archive/refs/tags/v1.1.1.tar.gz
-	sha256sums = c86899e082e72ae8044f05e90845ef5c8f235e594a92196c72172245eb4a8e10
+	source = stcli-1.1.2.tar.gz::https://github.com/anshumansingh0010/syncthing-cli/archive/refs/tags/v1.1.2.tar.gz
+	sha256sums = 9965b6d334ebbc01a1f7a0cc5e1ed2d87099664f033472ba4ff8a3e69e43f27e
 
 pkgname = stcli

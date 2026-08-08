@@ -46,7 +46,7 @@ def devices_list(ctx):
     try:
         devices     = client.devices()
         conns_resp  = client.system_connections()
-        connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+        connections = (conns_resp.get("connections") if isinstance(conns_resp, dict) else {}) or {}
         stats       = client.stats_devices()
     except SyncthingError as e:
         console.print(f"[error]✗ Failed to fetch devices: {e}[/error]")
@@ -109,7 +109,7 @@ def device_info(ctx, device_id):
     did = dev["deviceID"]
 
     conns_resp  = client.system_connections()
-    connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    connections = (conns_resp.get("connections") if isinstance(conns_resp, dict) else {}) or {}
     conn        = connections.get(did, {}) if isinstance(connections, dict) else {}
     stats       = client.stats_devices()
     stat        = stats.get(did, {}) if isinstance(stats, dict) else {}
@@ -232,7 +232,7 @@ def device_ping(ctx, device_id):
     did = dev["deviceID"]
 
     conns_resp  = client.system_connections()
-    connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    connections = (conns_resp.get("connections") if isinstance(conns_resp, dict) else {}) or {}
     conn        = connections.get(did, {}) if isinstance(connections, dict) else {}
 
     connected = conn.get("connected", False) if isinstance(conn, dict) else False

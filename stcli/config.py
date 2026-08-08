@@ -32,7 +32,15 @@ class ConnectionProfile:
     @property
     def base_url(self) -> str:
         scheme = "https" if self.tls else "http"
-        return f"{scheme}://{self.host}:{self.port}"
+        clean_host = self.host.replace("http://", "").replace("https://", "").rstrip("/")
+        port = self.port
+        if ":" in clean_host:
+            clean_host, port_str = clean_host.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                pass
+        return f"{scheme}://{clean_host}:{port}"
 
     def to_dict(self) -> dict:
         return {
@@ -60,11 +68,17 @@ def _parse_syncthing_config(path: Path) -> Optional[ConnectionProfile]:
 
         address = gui.findtext("address", "127.0.0.1:8384")
         api_key = gui.findtext("apikey", "")
-        tls = gui.get("tls", "false").lower() == "true"
+        tls_attr = gui.get("tls")
+        if tls_attr is None:
+            tls_attr = gui.findtext("tls", "false")
+        tls = str(tls_attr).lower() == "true"
 
         if ":" in address:
             host, port_str = address.rsplit(":", 1)
-            port = int(port_str)
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 8384
         else:
             host, port = address, 8384
 
@@ -112,6 +126,7 @@ def load_profiles() -> dict[str, ConnectionProfile]:
 def save_profile(profile: ConnectionProfile) -> None:
     profiles = load_profiles()
     profiles[profile.name] = profile
+    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     PROFILE_PATH.write_text(
         json.dumps({n: p.to_dict() for n, p in profiles.items()}, indent=2)
     )
@@ -122,6 +137,7 @@ def delete_profile(name: str) -> bool:
     if name not in profiles:
         return False
     del profiles[name]
+    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     PROFILE_PATH.write_text(
         json.dumps({n: p.to_dict() for n, p in profiles.items()}, indent=2)
     )
@@ -141,6 +157,7 @@ def set_default_profile(name: str) -> bool:
     default_p = ConnectionProfile.from_dict(profiles[name].to_dict())
     default_p.name = "default"
     profiles["default"] = default_p
+    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     PROFILE_PATH.write_text(
         json.dumps({n: p.to_dict() for n, p in profiles.items()}, indent=2)
     )

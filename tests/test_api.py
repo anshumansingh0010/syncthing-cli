@@ -87,3 +87,23 @@ def test_system_logs_and_debug(client):
     with patch.object(client._session, "get", return_value=mock_resp):
         debug = client.system_debug()
         assert debug["enabled"] == ["db"]
+
+
+def test_non_json_response_handling(client):
+    mock_resp = MagicMock()
+    mock_resp.ok = True
+    mock_resp.text = "OK"
+    mock_resp.json.side_effect = Exception("JSONDecodeError")
+
+    with patch.object(client._session, "post", return_value=mock_resp):
+        res = client._post("db/scan")
+        assert res == {"result": "OK"}
+
+
+def test_connection_profile_base_url_cleaning():
+    p1 = ConnectionProfile(host="http://127.0.0.1", port=8384)
+    assert p1.base_url == "http://127.0.0.1:8384"
+
+    p2 = ConnectionProfile(host="127.0.0.1:8384", port=8384)
+    assert p2.base_url == "http://127.0.0.1:8384"
+
