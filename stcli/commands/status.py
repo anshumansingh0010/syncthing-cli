@@ -2,23 +2,40 @@
 
 import click
 from rich.panel import Panel
-from rich.columns import Columns
-from rich.text import Text
 from rich.table import Table
 from rich import box
 
-from stcli.output import console, fmt_bytes, folder_state_style, device_state_style
+from stcli.output import console, fmt_bytes, folder_state_style, device_state_style, print_json
+from stcli.api import SyncthingError
 
 
 @click.command("status")
-@click.pass_obj
-def status_cmd(client):
+@click.pass_context
+def status_cmd(ctx):
     """Show an overall snapshot of your Syncthing instance."""
-    sys_status   = client.system_status()
-    sys_version  = client.system_version()
-    folders      = client.folders()
-    devices      = client.devices()
-    connections  = client.system_connections().get("connections", {})
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+
+    try:
+        sys_status   = client.system_status()
+        sys_version  = client.system_version()
+        folders      = client.folders()
+        devices      = client.devices()
+        conns_resp   = client.system_connections()
+        connections  = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch status: {e}[/error]")
+        raise SystemExit(1)
+
+    if json_out:
+        print_json({
+            "system": sys_status,
+            "version": sys_version,
+            "folders": folders,
+            "devices": devices,
+            "connections": connections,
+        })
+        return
 
     my_id  = sys_status.get("myID", "")
     uptime = sys_status.get("uptime", 0)
@@ -30,7 +47,7 @@ def status_cmd(client):
     m, s   = divmod(rem, 60)
     uptime_str = f"{h}h {m}m {s}s"
 
-    connected_devs = sum(1 for c in connections.values() if c.get("connected"))
+    connected_devs = sum(1 for c in connections.values() if isinstance(c, dict) and c.get("connected"))
 
     # ── Header panel ─────────────────────────────────────────────────────────
     header_lines = [
@@ -95,11 +112,11 @@ def status_cmd(client):
         did    = dev["deviceID"]
         name   = dev.get("name") or did[:7] + "…"
         paused = dev.get("paused", False)
-        conn   = connections.get(did, {})
-        connected = conn.get("connected", False)
+        conn   = connections.get(did, {}) if isinstance(connections, dict) else {}
+        connected = conn.get("connected", False) if isinstance(conn, dict) else False
         traffic   = (
             f"↓{fmt_bytes(conn.get('inBytesTotal',0))} ↑{fmt_bytes(conn.get('outBytesTotal',0))}"
-            if connected else "—"
+            if connected and isinstance(conn, dict) else "—"
         )
         dtable.add_row(did[:7] + "…", name, device_state_style(connected, paused), traffic)
 

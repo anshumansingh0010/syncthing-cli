@@ -1,7 +1,7 @@
 # Maintainer: Anshuman Singh <your.email@example.com>
 
 pkgname=stcli
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="A beautiful CLI for Syncthing"
 arch=('any')

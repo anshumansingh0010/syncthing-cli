@@ -7,10 +7,10 @@ from rich import box
 
 from stcli.config import (
     ConnectionProfile, detect_profile,
-    save_profile, load_profiles, delete_profile,
+    save_profile, load_profiles, delete_profile, get_profile, set_default_profile,
 )
 from stcli.api import SyncthingClient, SyncthingError
-from stcli.output import console
+from stcli.output import console, print_json
 
 
 @click.group("connect")
@@ -54,9 +54,16 @@ def connect_add(name, host, port, api_key, tls, no_verify):
 
 
 @connect_group.command("list")
-def connect_list():
+@click.pass_context
+def connect_list(ctx):
     """Show all saved connection profiles."""
+    json_out = ctx.find_root().params.get("json_output", False)
     profiles = load_profiles()
+
+    if json_out:
+        print_json({n: p.to_dict() for n, p in profiles.items()})
+        return
+
     if not profiles:
         console.print("[muted]No saved profiles. Run [bold]stcli connect add[/bold] or [bold]stcli connect auto[/bold].[/muted]")
         return
@@ -77,6 +84,51 @@ def connect_list():
     console.print(table)
 
 
+@connect_group.command("show")
+@click.argument("name", default="default")
+@click.pass_context
+def connect_show(ctx, name):
+    """Show detailed settings of a profile (or auto-detected fallback)."""
+    json_out = ctx.find_root().params.get("json_output", False)
+    profile = get_profile(name) or detect_profile()
+
+    if not profile:
+        console.print(f"[error]Profile '[value]{name}[/value]' not found and auto-detection failed.[/error]")
+        raise SystemExit(1)
+
+    if json_out:
+        print_json(profile.to_dict())
+        return
+
+    lines = [
+        f"[label]Profile Name :[/label] [value]{profile.name}[/value]",
+        f"[label]Base URL     :[/label] [path]{profile.base_url}[/path]",
+        f"[label]Host         :[/label] [value]{profile.host}[/value]",
+        f"[label]Port         :[/label] [number]{profile.port}[/number]",
+        f"[label]TLS / HTTPS  :[/label] [value]{profile.tls}[/value]",
+        f"[label]Verify TLS   :[/label] [value]{profile.verify_tls}[/value]",
+        f"[label]API Key      :[/label] [muted]{profile.api_key[:8]}… ({len(profile.api_key)} chars)[/muted]" if profile.api_key else "[warn]No API Key[/warn]",
+    ]
+
+    console.print(Panel(
+        "\n".join(lines),
+        title=f"[title]🔌 Profile: {name}[/title]",
+        border_style="cyan",
+        expand=False,
+    ))
+
+
+@connect_group.command("default")
+@click.argument("name")
+def connect_default(name):
+    """Set a profile as the default connection profile."""
+    if set_default_profile(name):
+        console.print(f"[good]✓ Profile '[value]{name}[/value]' is now the default profile.[/good]")
+    else:
+        console.print(f"[error]Profile '[value]{name}[/value]' not found.[/error]")
+        raise SystemExit(1)
+
+
 @connect_group.command("remove")
 @click.argument("name")
 def connect_remove(name):
@@ -89,14 +141,16 @@ def connect_remove(name):
 
 @connect_group.command("test")
 @click.option("--profile", "profile_name", default="default", show_default=True)
-@click.pass_context
-def connect_test(ctx, profile_name):
-    """Test connectivity for a saved profile."""
-    from stcli.config import get_profile
+def connect_test(profile_name):
+    """Test connectivity for a profile (or auto-detected if default)."""
     profile = get_profile(profile_name)
+    if not profile and profile_name == "default":
+        profile = detect_profile()
+
     if not profile:
         console.print(f"[error]Profile '[value]{profile_name}[/value]' not found.[/error]")
         raise SystemExit(1)
+
     _test_and_print(profile)
 
 

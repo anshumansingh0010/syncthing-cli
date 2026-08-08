@@ -5,7 +5,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from stcli.output import console
+from stcli.output import console, print_json
+from stcli.resolvers import resolve_device
+from stcli.api import SyncthingError
 
 
 def _short(did: str) -> str:
@@ -18,11 +20,25 @@ def pending_cmd():
 
 
 @pending_cmd.command("list")
-@click.pass_obj
-def pending_list(client):
+@click.pass_context
+def pending_list(ctx):
     """Show all pending devices and folders waiting to be accepted."""
-    pend_devs    = client.pending_devices()
-    pend_folders = client.pending_folders()
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+
+    try:
+        pend_devs    = client.pending_devices()
+        pend_folders = client.pending_folders()
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch pending items: {e}[/error]")
+        raise SystemExit(1)
+
+    if json_out:
+        print_json({
+            "pending_devices": pend_devs,
+            "pending_folders": pend_folders,
+        })
+        return
 
     if not pend_devs and not pend_folders:
         console.print("[synced]✓ No pending devices or folders.[/synced]")
@@ -90,22 +106,15 @@ def accept_group():
               help="Trust as an introducer.")
 @click.pass_obj
 def accept_device(client, device_id, name, introducer):
-    """Accept a pending device connection request.
-
-    \b
-    Example:
-      stcli pending accept device DEVICE7-ABCDEF-...
-      stcli pending accept device DEVICE7-ABCDEF-... --name "my-phone"
-    """
+    """Accept a pending device connection request."""
     pend = client.pending_devices()
-    # Support prefix matching
-    matches = {did: info for did, info in pend.items() if did.startswith(device_id)}
+    matches = {did: info for did, info in pend.items() if did.lower().startswith(device_id.lower())}
     if not matches:
         console.print(f"[error]✗ No pending device matching '[id]{device_id}[/id]'[/error]")
         console.print("[muted]Run [bold]stcli pending list[/bold] to see pending devices.[/muted]")
         raise SystemExit(1)
     if len(matches) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(matches)} devices.[/warn]")
+        console.print(f"[warn]Ambiguous prefix – matched {len(matches)} pending devices.[/warn]")
         raise SystemExit(1)
 
     full_id, info = next(iter(matches.items()))
@@ -121,7 +130,7 @@ def accept_device(client, device_id, name, introducer):
 
     try:
         client.add_device(cfg)
-    except Exception as e:
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed to accept device: {e}[/error]")
         raise SystemExit(1)
 
@@ -148,31 +157,36 @@ def accept_device(client, device_id, name, introducer):
               default="sendreceive", show_default=True)
 @click.pass_obj
 def accept_folder(client, folder_id, from_device, local_path, label, folder_type):
-    """Accept a pending folder offered by another device.
-
-    \b
-    Example:
-      stcli pending accept folder my-docs \\
-          --from DEVICE7-ABCDEF-... \\
-          --path ~/Documents/shared
-    """
+    """Accept a pending folder offered by another device."""
     import os
     pend = client.pending_folders()
-    matches = {fid: info for fid, info in pend.items() if fid.startswith(folder_id)}
+    matches = {fid: info for fid, info in pend.items() if fid.lower().startswith(folder_id.lower())}
     if not matches:
         console.print(f"[error]✗ No pending folder matching '[id]{folder_id}[/id]'[/error]")
         console.print("[muted]Run [bold]stcli pending list[/bold] to see pending folders.[/muted]")
         raise SystemExit(1)
     if len(matches) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(matches)} folders.[/warn]")
+        console.print(f"[warn]Ambiguous prefix – matched {len(matches)} pending folders.[/warn]")
         raise SystemExit(1)
 
     full_fid, info = next(iter(matches.items()))
     resolved_label = label or info.get("label") or os.path.basename(local_path)
 
-    # Include the offering device + self
+    # Resolve from_device to full device ID if possible
+    offered_by = info.get("offeredBy", {})
+    from_matches = [d for d in offered_by.keys() if d.lower().startswith(from_device.lower())]
+    if from_matches:
+        full_from_device = from_matches[0]
+    else:
+        # Fallback to resolve_device or raw string
+        try:
+            dev = resolve_device(client, from_device)
+            full_from_device = dev["deviceID"]
+        except Exception:
+            full_from_device = from_device
+
     my_id = client.system_status().get("myID", "")
-    devices = [{"deviceID": my_id}, {"deviceID": from_device}]
+    devices = [{"deviceID": my_id}, {"deviceID": full_from_device}]
 
     cfg = {
         "id":    full_fid,
@@ -186,7 +200,7 @@ def accept_folder(client, folder_id, from_device, local_path, label, folder_type
 
     try:
         client.add_folder(cfg)
-    except Exception as e:
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed to accept folder: {e}[/error]")
         raise SystemExit(1)
 
@@ -195,7 +209,7 @@ def accept_folder(client, folder_id, from_device, local_path, label, folder_type
         f"[label]Label     :[/label] [value]{resolved_label}[/value]\n"
         f"[label]Path      :[/label] [path]{local_path}[/path]\n"
         f"[label]Type      :[/label] [value]{folder_type}[/value]\n"
-        f"[label]From      :[/label] [id]{_short(from_device)}[/id]",
+        f"[label]From      :[/label] [id]{_short(full_from_device)}[/id]",
         title="[good]✓ Folder Accepted[/good]",
         border_style="green",
         expand=False,
@@ -213,14 +227,9 @@ def dismiss_group():
 @click.argument("device_id")
 @click.pass_obj
 def dismiss_device(client, device_id):
-    """Dismiss a pending device — it will stop showing up.
-
-    \b
-    Example:
-      stcli pending dismiss device DEVICE7-ABCDEF-...
-    """
+    """Dismiss a pending device request."""
     pend = client.pending_devices()
-    matches = {did: info for did, info in pend.items() if did.startswith(device_id)}
+    matches = {did: info for did, info in pend.items() if did.lower().startswith(device_id.lower())}
     if not matches:
         console.print(f"[error]✗ No pending device matching '[id]{device_id}[/id]'[/error]")
         raise SystemExit(1)
@@ -229,7 +238,7 @@ def dismiss_device(client, device_id):
         try:
             client.dismiss_pending_device(full_id)
             console.print(f"[muted]✓ Dismissed device [id]{_short(full_id)}[/id][/muted]")
-        except Exception as e:
+        except SyncthingError as e:
             console.print(f"[error]✗ Failed to dismiss [id]{_short(full_id)}[/id]: {e}[/error]")
 
 
@@ -239,15 +248,16 @@ def dismiss_device(client, device_id):
               help="Device ID that offered the folder.")
 @click.pass_obj
 def dismiss_folder(client, folder_id, from_device):
-    """Dismiss a pending folder offer.
-
-    \b
-    Example:
-      stcli pending dismiss folder my-docs --from DEVICE7-ABCDEF-...
-    """
+    """Dismiss a pending folder offer."""
     try:
-        client.dismiss_pending_folder(folder_id, from_device)
-        console.print(f"[muted]✓ Dismissed folder [id]{folder_id}[/id] from [id]{_short(from_device)}[/id][/muted]")
-    except Exception as e:
-        console.print(f"[error]✗ Failed: {e}[/error]")
+        dev = resolve_device(client, from_device)
+        full_from = dev["deviceID"]
+    except Exception:
+        full_from = from_device
+
+    try:
+        client.dismiss_pending_folder(folder_id, full_from)
+        console.print(f"[muted]✓ Dismissed folder [id]{folder_id}[/id] from [id]{_short(full_from)}[/id][/muted]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to dismiss folder: {e}[/error]")
         raise SystemExit(1)

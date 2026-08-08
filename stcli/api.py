@@ -5,7 +5,8 @@ All methods raise SyncthingError on non-2xx responses.
 
 import requests
 import urllib3
-from typing import Any
+from urllib.parse import quote
+from typing import Any, Optional
 
 from stcli.config import ConnectionProfile
 
@@ -83,6 +84,18 @@ class SyncthingClient:
     def system_ping(self) -> dict:
         return self._get("system/ping")
 
+    def system_restart(self) -> None:
+        self._post("system/restart")
+
+    def system_shutdown(self) -> None:
+        self._post("system/shutdown")
+
+    def system_logs(self) -> dict:
+        return self._get("system/logs")
+
+    def system_debug(self) -> dict:
+        return self._get("system/debug")
+
     # ── Config ────────────────────────────────────────────────────────────────
 
     def config(self) -> dict:
@@ -99,7 +112,7 @@ class SyncthingClient:
     def folder_status(self, folder_id: str) -> dict:
         return self._get("db/status", folder=folder_id)
 
-    def folder_completion(self, folder_id: str, device_id: str | None = None) -> dict:
+    def folder_completion(self, folder_id: str, device_id: Optional[str] = None) -> dict:
         params: dict = {"folder": folder_id}
         if device_id:
             params["device"] = device_id
@@ -107,6 +120,26 @@ class SyncthingClient:
 
     def folder_errors(self, folder_id: str) -> dict:
         return self._get("db/folder/errors", folder=folder_id)
+
+    def db_scan(self, folder_id: Optional[str] = None, sub: Optional[str] = None) -> None:
+        params = {}
+        if folder_id:
+            params["folder"] = folder_id
+        if sub:
+            params["sub"] = sub
+        self._post("db/scan", **params)
+
+    def db_override(self, folder_id: str) -> None:
+        self._post("db/override", folder=folder_id)
+
+    def db_revert(self, folder_id: str) -> None:
+        self._post("db/revert", folder=folder_id)
+
+    def db_ignores(self, folder_id: str) -> dict:
+        return self._get("db/ignores", folder=folder_id)
+
+    def update_db_ignores(self, folder_id: str, ignore_patterns: list[str]) -> dict:
+        return self._post("db/ignores", json_body={"ignore": ignore_patterns}, folder=folder_id)
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -119,15 +152,19 @@ class SyncthingClient:
     # ── Pause / Resume ────────────────────────────────────────────────────────
 
     def pause_folder(self, folder_id: str) -> None:
-        self._patch(f"config/folders/{folder_id}", {"paused": True})
+        q_id = quote(folder_id, safe='')
+        self._patch(f"config/folders/{q_id}", {"paused": True})
 
     def resume_folder(self, folder_id: str) -> None:
-        self._patch(f"config/folders/{folder_id}", {"paused": False})
+        q_id = quote(folder_id, safe='')
+        self._patch(f"config/folders/{q_id}", {"paused": False})
 
     def pause_device(self, device_id: str) -> None:
-        self._patch(f"config/devices/{device_id}", {"paused": True})
+        q_id = quote(device_id, safe='')
+        self._patch(f"config/devices/{q_id}", {"paused": True})
 
     def resume_device(self, device_id: str) -> None:
+        q_id = quote(device_id, safe='')
         self._patch(f"config/devices/{device_id}", {"paused": False})
 
     # ── Folder CRUD ───────────────────────────────────────────────────────────
@@ -138,12 +175,14 @@ class SyncthingClient:
 
     def get_folder(self, folder_id: str) -> dict:
         """GET a single folder's full config."""
-        return self._get(f"config/folders/{folder_id}")
+        q_id = quote(folder_id, safe='')
+        return self._get(f"config/folders/{q_id}")
 
     def update_folder(self, folder_id: str, folder_cfg: dict) -> dict:
         """PUT (full replace) a folder's config."""
+        q_id = quote(folder_id, safe='')
         resp = self._session.put(
-            self._url(f"config/folders/{folder_id}"),
+            self._url(f"config/folders/{q_id}"),
             json=folder_cfg,
             verify=self._verify, timeout=10,
         )
@@ -152,8 +191,9 @@ class SyncthingClient:
 
     def remove_folder(self, folder_id: str) -> None:
         """DELETE a folder from the config."""
+        q_id = quote(folder_id, safe='')
         resp = self._session.delete(
-            self._url(f"config/folders/{folder_id}"),
+            self._url(f"config/folders/{q_id}"),
             verify=self._verify, timeout=10,
         )
         self._raise(resp)
@@ -164,10 +204,27 @@ class SyncthingClient:
         """POST a new device config. Returns the created config."""
         return self._post("config/devices", device_cfg)
 
+    def get_device(self, device_id: str) -> dict:
+        """GET a single device's full config."""
+        q_id = quote(device_id, safe='')
+        return self._get(f"config/devices/{q_id}")
+
+    def update_device(self, device_id: str, device_cfg: dict) -> dict:
+        """PUT (full replace) a device's config."""
+        q_id = quote(device_id, safe='')
+        resp = self._session.put(
+            self._url(f"config/devices/{q_id}"),
+            json=device_cfg,
+            verify=self._verify, timeout=10,
+        )
+        self._raise(resp)
+        return resp.json() if resp.text else {}
+
     def remove_device(self, device_id: str) -> None:
         """DELETE a device from the config."""
+        q_id = quote(device_id, safe='')
         resp = self._session.delete(
-            self._url(f"config/devices/{device_id}"),
+            self._url(f"config/devices/{q_id}"),
             verify=self._verify, timeout=10,
         )
         self._raise(resp)

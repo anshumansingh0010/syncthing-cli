@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 stcli/__init__.py
 stcli/api.py

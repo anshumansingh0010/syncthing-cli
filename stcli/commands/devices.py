@@ -1,12 +1,15 @@
 """stcli – devices commands."""
 
+import time
 import click
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
 from datetime import datetime, timezone
 
-from stcli.output import console, fmt_bytes, device_state_style
+from stcli.output import console, fmt_bytes, device_state_style, print_json
+from stcli.resolvers import resolve_device
+from stcli.api import SyncthingError
 
 
 def _short_id(device_id: str) -> str:
@@ -30,16 +33,32 @@ def _parse_time(ts: str | None) -> str:
 
 @click.group("devices")
 def devices_group():
-    """List, inspect, add, remove, pause, and resume connected devices."""
+    """List, inspect, add, remove, edit, pause, resume, and ping devices."""
 
 
 @devices_group.command("list")
-@click.pass_obj
-def devices_list(client):
+@click.pass_context
+def devices_list(ctx):
     """List all configured devices."""
-    devices     = client.devices()
-    connections = client.system_connections().get("connections", {})
-    stats       = client.stats_devices()
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+
+    try:
+        devices     = client.devices()
+        conns_resp  = client.system_connections()
+        connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+        stats       = client.stats_devices()
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch devices: {e}[/error]")
+        raise SystemExit(1)
+
+    if json_out:
+        print_json({
+            "devices": devices,
+            "connections": connections,
+            "stats": stats,
+        })
+        return
 
     table = Table(
         title="[title]Syncthing Devices[/title]",
@@ -59,14 +78,14 @@ def devices_list(client):
         did    = dev["deviceID"]
         name   = dev.get("name") or _short_id(did)
         paused = dev.get("paused", False)
-        conn   = connections.get(did, {})
-        stat   = stats.get(did, {})
+        conn   = connections.get(did, {}) if isinstance(connections, dict) else {}
+        stat   = stats.get(did, {}) if isinstance(stats, dict) else {}
 
-        connected = conn.get("connected", False)
-        addr      = conn.get("address", "—") if connected else "—"
-        last_seen = _parse_time(stat.get("lastSeen"))
-        inb       = fmt_bytes(conn.get("inBytesTotal", 0))
-        outb      = fmt_bytes(conn.get("outBytesTotal", 0))
+        connected = conn.get("connected", False) if isinstance(conn, dict) else False
+        addr      = conn.get("address", "—") if connected and isinstance(conn, dict) else "—"
+        last_seen = _parse_time(stat.get("lastSeen") if isinstance(stat, dict) else None)
+        inb       = fmt_bytes(conn.get("inBytesTotal", 0)) if isinstance(conn, dict) else "0 B"
+        outb      = fmt_bytes(conn.get("outBytesTotal", 0)) if isinstance(conn, dict) else "0 B"
 
         table.add_row(
             _short_id(did), name,
@@ -80,29 +99,35 @@ def devices_list(client):
 
 @devices_group.command("info")
 @click.argument("device_id")
-@click.pass_obj
-def device_info(client, device_id):
-    """Show detailed info for a specific device (full or short ID)."""
-    devices = client.devices()
-    # Support prefix matching
-    match = [d for d in devices if d["deviceID"].startswith(device_id)]
-    if not match:
-        console.print(f"[error]No device found matching '[id]{device_id}[/id]'[/error]")
-        raise SystemExit(1)
-    if len(match) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(match)} devices.[/warn]")
-        raise SystemExit(1)
+@click.pass_context
+def device_info(ctx, device_id):
+    """Show detailed info for a specific device (full ID, short ID, or name)."""
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
 
-    dev  = match[0]
-    did  = dev["deviceID"]
-    conn = client.system_connections().get("connections", {}).get(did, {})
-    stat = client.stats_devices().get(did, {})
+    dev = resolve_device(client, device_id)
+    did = dev["deviceID"]
+
+    conns_resp  = client.system_connections()
+    connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    conn        = connections.get(did, {}) if isinstance(connections, dict) else {}
+    stats       = client.stats_devices()
+    stat        = stats.get(did, {}) if isinstance(stats, dict) else {}
+
+    if json_out:
+        print_json({
+            "config": dev,
+            "connection": conn,
+            "stats": stat,
+        })
+        return
 
     lines = [
         f"[label]Device ID   :[/label] [id]{did}[/id]",
         f"[label]Name        :[/label] [value]{dev.get('name') or '(unnamed)'}[/value]",
         f"[label]Paused      :[/label] [value]{dev.get('paused', False)}[/value]",
         f"[label]Introducer  :[/label] [value]{dev.get('introducer', False)}[/value]",
+        f"[label]Auto Accept :[/label] [value]{dev.get('autoAcceptFolders', False)}[/value]",
         "",
         f"[label]Connected   :[/label] {device_state_style(conn.get('connected', False), dev.get('paused', False))}",
         f"[label]Address     :[/label] [path]{conn.get('address', '—')}[/path]",
@@ -132,8 +157,14 @@ def device_info(client, device_id):
 @click.pass_obj
 def device_pause(client, device_id):
     """Pause syncing with a device."""
-    client.pause_device(device_id)
-    console.print(f"[paused]⏸  Device [id]{device_id}[/id] paused.[/paused]")
+    dev = resolve_device(client, device_id)
+    did = dev["deviceID"]
+    try:
+        client.pause_device(did)
+        console.print(f"[paused]⏸  Device [id]{_short_id(did)}[/id] paused.[/paused]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to pause device: {e}[/error]")
+        raise SystemExit(1)
 
 
 @devices_group.command("resume")
@@ -141,8 +172,100 @@ def device_pause(client, device_id):
 @click.pass_obj
 def device_resume(client, device_id):
     """Resume syncing with a device."""
-    client.resume_device(device_id)
-    console.print(f"[synced]▶  Device [id]{device_id}[/id] resumed.[/synced]")
+    dev = resolve_device(client, device_id)
+    did = dev["deviceID"]
+    try:
+        client.resume_device(did)
+        console.print(f"[synced]▶  Device [id]{_short_id(did)}[/id] resumed.[/synced]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to resume device: {e}[/error]")
+        raise SystemExit(1)
+
+
+@devices_group.command("edit")
+@click.argument("device_id")
+@click.option("--name", default=None, help="Set friendly device name.")
+@click.option("--address", "addresses", multiple=True, help="Set configured address(es).")
+@click.option("--introducer/--no-introducer", default=None, help="Set introducer flag.")
+@click.option("--auto-accept/--no-auto-accept", default=None, help="Auto accept folders from this device.")
+@click.pass_obj
+def device_edit(client, device_id, name, addresses, introducer, auto_accept):
+    """Edit settings of an existing device."""
+    dev = resolve_device(client, device_id)
+    did = dev["deviceID"]
+    dev_cfg = client.get_device(did)
+
+    updated = False
+    if name is not None:
+        dev_cfg["name"] = name
+        updated = True
+    if addresses:
+        dev_cfg["addresses"] = list(addresses)
+        updated = True
+    if introducer is not None:
+        dev_cfg["introducer"] = introducer
+        updated = True
+    if auto_accept is not None:
+        dev_cfg["autoAcceptFolders"] = auto_accept
+        updated = True
+
+    if not updated:
+        console.print("[warn]No options provided to update.[/warn]")
+        return
+
+    try:
+        client.update_device(did, dev_cfg)
+        console.print(f"[good]✓ Device [id]{_short_id(did)}[/id] updated successfully.[/good]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to update device: {e}[/error]")
+        raise SystemExit(1)
+
+
+@devices_group.command("ping")
+@click.argument("device_id")
+@click.pass_context
+def device_ping(ctx, device_id):
+    """Check connection status and details for a device."""
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+    dev = resolve_device(client, device_id)
+    did = dev["deviceID"]
+
+    conns_resp  = client.system_connections()
+    connections = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
+    conn        = connections.get(did, {}) if isinstance(connections, dict) else {}
+
+    connected = conn.get("connected", False) if isinstance(conn, dict) else False
+
+    if json_out:
+        print_json({
+            "deviceID": did,
+            "name": dev.get("name"),
+            "connected": connected,
+            "connectionDetails": conn,
+        })
+        return
+
+    if connected:
+        console.print(Panel(
+            f"[good]● Connected[/good]\n\n"
+            f"[label]Device   :[/label] [id]{did}[/id] ([value]{dev.get('name') or '(unnamed)'}[/value])\n"
+            f"[label]Address  :[/label] [path]{conn.get('address', '—')}[/path]\n"
+            f"[label]Client   :[/label] [value]{conn.get('clientVersion', '—')}[/value]\n"
+            f"[label]Protocol :[/label] [value]{conn.get('type', '—')}[/value]\n"
+            f"[label]Crypto   :[/label] [value]{conn.get('crypto', '—')}[/value]",
+            title="[good]✓ Device Ping OK[/good]",
+            border_style="green",
+            expand=False,
+        ))
+    else:
+        console.print(Panel(
+            f"[muted]○ Disconnected[/muted]\n\n"
+            f"[label]Device   :[/label] [id]{did}[/id] ([value]{dev.get('name') or '(unnamed)'}[/value])",
+            title="[warn]⚠ Device Disconnected[/warn]",
+            border_style="yellow",
+            expand=False,
+        ))
 
 
 @devices_group.command("add")
@@ -154,13 +277,7 @@ def device_resume(client, device_id):
               help="Trust this device as an introducer.")
 @click.pass_obj
 def device_add(client, device_id, name, addresses, introducer):
-    """Add a new device to Syncthing.
-
-    \b
-    Examples:
-      stcli devices add DEVICE7-ABCDEF-...
-      stcli devices add DEVICE7-ABCDEF-... --name laptop --address tcp://192.168.1.10:22000
-    """
+    """Add a new device to Syncthing."""
     cfg = {
         "deviceID":    device_id,
         "name":        name or "",
@@ -171,7 +288,7 @@ def device_add(client, device_id, name, addresses, introducer):
 
     try:
         client.add_device(cfg)
-    except Exception as e:
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed to add device: {e}[/error]")
         raise SystemExit(1)
 
@@ -191,24 +308,8 @@ def device_add(client, device_id, name, addresses, introducer):
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.pass_obj
 def device_remove(client, device_id, yes):
-    """Remove a device from Syncthing.
-
-    \b
-    Example:
-      stcli devices remove DEVICE7-ABCDEF-...
-      stcli devices remove DEVICE7-ABCDEF-... --yes
-    """
-    devices = client.devices()
-    # Support prefix matching
-    match = [d for d in devices if d["deviceID"].startswith(device_id)]
-    if not match:
-        console.print(f"[error]✗ No device found matching '[id]{device_id}[/id]'[/error]")
-        raise SystemExit(1)
-    if len(match) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(match)} devices.[/warn]")
-        raise SystemExit(1)
-
-    dev  = match[0]
+    """Remove a device from Syncthing."""
+    dev  = resolve_device(client, device_id)
     did  = dev["deviceID"]
     name = dev.get("name") or _short_id(did)
 
@@ -220,8 +321,8 @@ def device_remove(client, device_id, yes):
 
     try:
         client.remove_device(did)
-    except Exception as e:
-        console.print(f"[error]✗ Failed: {e}[/error]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to remove device: {e}[/error]")
         raise SystemExit(1)
 
     console.print(f"[good]✓ Device [id]{_short_id(did)}[/id] ([value]{name}[/value]) removed.[/good]")

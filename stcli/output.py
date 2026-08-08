@@ -68,3 +68,10 @@ def device_state_style(connected: bool, paused: bool) -> str:
     if connected:
         return "[synced]● connected[/synced]"
     return "[muted]○ disconnected[/muted]"
+
+
+def print_json(data: any) -> None:
+    """Print structured data as pretty JSON."""
+    import json
+    console.print_json(json.dumps(data, default=str))
+

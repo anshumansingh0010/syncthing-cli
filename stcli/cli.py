@@ -4,41 +4,65 @@ import click
 from rich.panel import Panel
 
 from stcli.output import console
-from stcli.config import detect_profile, get_profile
+from stcli.config import detect_profile, get_profile, ConnectionProfile
 from stcli.api import SyncthingClient, SyncthingError
 from stcli.commands.status  import status_cmd
 from stcli.commands.folders import folders_group
 from stcli.commands.devices import devices_group
 from stcli.commands.connect import connect_group
 from stcli.commands.pending import pending_cmd
+from stcli.commands.system  import system_group
+from stcli.commands.watch   import watch_cmd, events_cmd
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
 
-def _build_client(profile_name: str, host: str, port: int, api_key: str, tls: bool) -> SyncthingClient:
+def _build_client(ctx: click.Context, profile_name: str, host: str, port: int, api_key: str, tls: bool) -> SyncthingClient:
     """Resolve connection: explicit flags > named profile > auto-detect."""
-    if api_key:
-        from stcli.config import ConnectionProfile
-        profile = ConnectionProfile(host=host, port=port, api_key=api_key, tls=tls)
-    elif profile_name != "default" or not api_key:
-        profile = get_profile(profile_name)
-        if profile is None:
-            profile = detect_profile()
-        if profile is None:
+
+    # Find loaded base profile or auto-detect
+    base_profile = None
+    if profile_name and profile_name != "default":
+        base_profile = get_profile(profile_name)
+
+    if base_profile is None:
+        base_profile = get_profile("default")
+
+    if base_profile is None:
+        base_profile = detect_profile()
+
+    if base_profile is None:
+        if api_key:
+            base_profile = ConnectionProfile(host=host, port=port, api_key=api_key, tls=tls)
+        else:
             console.print(
                 "[error]✗  Could not connect to Syncthing.[/error]\n"
                 "[muted]Run [bold]stcli connect auto[/bold] to detect automatically,\n"
                 "or [bold]stcli connect add --api-key <KEY>[/bold] to configure manually.[/muted]"
             )
             raise SystemExit(1)
-        # Override individual fields if provided
-        if host != "127.0.0.1":
-            profile.host = host
-        if port != 8384:
-            profile.port = port
-    else:
-        from stcli.config import ConnectionProfile
-        profile = ConnectionProfile(host=host, port=port, api_key=api_key, tls=tls)
+
+    # Check parameter sources for explicit overrides
+    has_host_override = ctx.get_parameter_source("host") == click.core.ParameterSource.COMMANDLINE
+    has_port_override = ctx.get_parameter_source("port") == click.core.ParameterSource.COMMANDLINE
+    has_key_override  = ctx.get_parameter_source("api_key") == click.core.ParameterSource.COMMANDLINE or bool(api_key and not base_profile.api_key)
+    has_tls_override  = ctx.get_parameter_source("tls") == click.core.ParameterSource.COMMANDLINE
+
+    profile = ConnectionProfile(
+        host=host if has_host_override else base_profile.host,
+        port=port if has_port_override else base_profile.port,
+        api_key=api_key if has_key_override else base_profile.api_key,
+        tls=tls if has_tls_override else base_profile.tls,
+        verify_tls=base_profile.verify_tls,
+        name=profile_name or base_profile.name,
+    )
+
+    if not profile.api_key:
+        console.print(
+            "[error]✗  No API Key configured.[/error]\n"
+            "[muted]Pass [bold]--api-key <KEY>[/bold] or run [bold]stcli connect auto[/bold].[/muted]"
+        )
+        raise SystemExit(1)
 
     return SyncthingClient(profile)
 
@@ -46,7 +70,7 @@ def _build_client(profile_name: str, host: str, port: int, api_key: str, tls: bo
 # ── Root command ──────────────────────────────────────────────────────────────
 
 @click.group()
-@click.version_option("1.0.0", prog_name="stcli")
+@click.version_option("1.1.0", prog_name="stcli")
 @click.option("--profile", "profile_name", default="default",
               envvar="STCLI_PROFILE", show_default=True,
               help="Named connection profile to use.")
@@ -58,8 +82,10 @@ def _build_client(profile_name: str, host: str, port: int, api_key: str, tls: bo
               help="Syncthing API key.")
 @click.option("--tls/--no-tls", default=False,
               help="Use HTTPS for connection.")
+@click.option("--json", "-j", "json_output", is_flag=True, default=False,
+              help="Output raw machine-readable JSON.")
 @click.pass_context
-def cli(ctx, profile_name, host, port, api_key, tls):
+def cli(ctx, profile_name, host, port, api_key, tls, json_output):
     """
     \b
     ╔══════════════════════════════╗
@@ -76,6 +102,8 @@ def cli(ctx, profile_name, host, port, api_key, tls):
       stcli folders list
       stcli folders info my-folder-id
       stcli devices list
+      stcli system info
+      stcli watch
       stcli connect auto --save home
       stcli --profile home status
     """
@@ -86,7 +114,7 @@ def cli(ctx, profile_name, host, port, api_key, tls):
         return
 
     try:
-        client = _build_client(profile_name, host, port, api_key, tls)
+        client = _build_client(ctx, profile_name, host, port, api_key, tls)
     except SystemExit:
         raise
     except Exception as e:
@@ -103,6 +131,9 @@ cli.add_command(folders_group)
 cli.add_command(devices_group)
 cli.add_command(connect_group)
 cli.add_command(pending_cmd)
+cli.add_command(system_group)
+cli.add_command(watch_cmd)
+cli.add_command(events_cmd)
 
 
 if __name__ == "__main__":

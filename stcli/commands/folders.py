@@ -3,23 +3,34 @@
 import click
 from rich.table import Table
 from rich.panel import Panel
-from rich.columns import Columns
 from rich import box
 
-from stcli.output import console, fmt_bytes, fmt_pct, folder_state_style
+from stcli.output import console, fmt_bytes, fmt_pct, folder_state_style, print_json
+from stcli.resolvers import resolve_folder, resolve_device
+from stcli.api import SyncthingError
 
 
 @click.group("folders")
 def folders_group():
-    """List, inspect, add, remove, pause, and resume synced folders."""
+    """List, inspect, add, remove, edit, pause, resume, and manage synced folders."""
 
 
 @folders_group.command("list")
-@click.pass_obj
-def folders_list(client):
+@click.pass_context
+def folders_list(ctx):
     """List all configured folders and their sync state."""
-    folders = client.folders()
-    stats   = client.stats_folders()
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+
+    try:
+        folders = client.folders()
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch folders: {e}[/error]")
+        raise SystemExit(1)
+
+    if json_out:
+        print_json(folders)
+        return
 
     table = Table(
         title="[title]Syncthing Folders[/title]",
@@ -57,28 +68,40 @@ def folders_list(client):
 
 @folders_group.command("info")
 @click.argument("folder_id")
-@click.pass_obj
-def folder_info(client, folder_id):
-    """Show detailed info for a specific folder."""
-    folders = {f["id"]: f for f in client.folders()}
-    if folder_id not in folders:
-        console.print(f"[error]Folder '[id]{folder_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
+@click.pass_context
+def folder_info(ctx, folder_id):
+    """Show detailed info for a specific folder (ID, label, or prefix)."""
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
 
-    folder = folders[folder_id]
-    status = client.folder_status(folder_id)
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+
     try:
-        completion = client.folder_completion(folder_id)
+        status = client.folder_status(fid)
+    except Exception:
+        status = {}
+
+    try:
+        completion = client.folder_completion(fid)
     except Exception:
         completion = {}
 
-    label  = folder.get("label") or folder_id
+    if json_out:
+        print_json({
+            "config": folder,
+            "status": status,
+            "completion": completion,
+        })
+        return
+
+    label  = folder.get("label") or fid
     paused = folder.get("paused", False)
     state  = status.get("state", "unknown")
     pct    = completion.get("completion", 100.0)
 
     lines = [
-        f"[label]ID       :[/label] [id]{folder_id}[/id]",
+        f"[label]ID       :[/label] [id]{fid}[/id]",
         f"[label]Label    :[/label] [value]{label}[/value]",
         f"[label]Path     :[/label] [path]{folder.get('path', '—')}[/path]",
         f"[label]Type     :[/label] [value]{folder.get('type', '—')}[/value]",
@@ -98,7 +121,6 @@ def folder_info(client, folder_id):
     if status.get("errors", 0):
         lines.append(f"\n[error]Errors: {status['errors']}[/error]")
 
-    # Shared devices
     devs = [d for d in folder.get("devices", []) if not d.get("introducedBy")]
     if devs:
         lines.append(f"\n[label]Shared with:[/label]")
@@ -118,8 +140,14 @@ def folder_info(client, folder_id):
 @click.pass_obj
 def folder_pause(client, folder_id):
     """Pause syncing for a folder."""
-    client.pause_folder(folder_id)
-    console.print(f"[paused]⏸  Folder [id]{folder_id}[/id] paused.[/paused]")
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    try:
+        client.pause_folder(fid)
+        console.print(f"[paused]⏸  Folder [id]{fid}[/id] paused.[/paused]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to pause folder: {e}[/error]")
+        raise SystemExit(1)
 
 
 @folders_group.command("resume")
@@ -127,22 +155,166 @@ def folder_pause(client, folder_id):
 @click.pass_obj
 def folder_resume(client, folder_id):
     """Resume syncing for a folder."""
-    client.resume_folder(folder_id)
-    console.print(f"[synced]▶  Folder [id]{folder_id}[/id] resumed.[/synced]")
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    try:
+        client.resume_folder(fid)
+        console.print(f"[synced]▶  Folder [id]{fid}[/id] resumed.[/synced]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to resume folder: {e}[/error]")
+        raise SystemExit(1)
+
+
+@folders_group.command("rescan")
+@click.argument("folder_id")
+@click.option("--sub", default=None, help="Subdirectory relative to folder root.")
+@click.pass_obj
+def folder_rescan(client, folder_id, sub):
+    """Trigger an immediate rescan of a folder."""
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    try:
+        client.db_scan(folder_id=fid, sub=sub)
+        msg = f"[good]✓ Rescan triggered for folder [id]{fid}[/id][/good]"
+        if sub:
+            msg += f" (sub: {sub})"
+        console.print(msg)
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to rescan folder: {e}[/error]")
+        raise SystemExit(1)
+
+
+@folders_group.command("override")
+@click.argument("folder_id")
+@click.pass_obj
+def folder_override(client, folder_id):
+    """Override remote changes for a Send Only folder."""
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    try:
+        client.db_override(fid)
+        console.print(f"[good]✓ Sent override command for folder [id]{fid}[/id].[/good]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to override folder: {e}[/error]")
+        raise SystemExit(1)
+
+
+@folders_group.command("revert")
+@click.argument("folder_id")
+@click.pass_obj
+def folder_revert(client, folder_id):
+    """Revert local changes for a Receive Only folder."""
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    try:
+        client.db_revert(fid)
+        console.print(f"[good]✓ Sent revert command for folder [id]{fid}[/id].[/good]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to revert folder: {e}[/error]")
+        raise SystemExit(1)
+
+
+@folders_group.command("ignore")
+@click.argument("folder_id")
+@click.option("--add", "add_pattern", multiple=True, help="Add ignore pattern(s).")
+@click.pass_context
+def folder_ignore(ctx, folder_id, add_pattern):
+    """View or manage ignore patterns (.stignore) for a folder."""
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+
+    try:
+        data = client.db_ignores(fid)
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch ignores: {e}[/error]")
+        raise SystemExit(1)
+
+    patterns = data.get("ignore") or []
+
+    if add_pattern:
+        new_patterns = patterns + list(add_pattern)
+        try:
+            res = client.update_db_ignores(fid, new_patterns)
+            patterns = res.get("ignore", new_patterns)
+            console.print(f"[good]✓ Added {len(add_pattern)} ignore pattern(s) to folder [id]{fid}[/id].[/good]")
+        except SyncthingError as e:
+            console.print(f"[error]✗ Failed to update ignores: {e}[/error]")
+            raise SystemExit(1)
+
+    if json_out:
+        print_json({"folder": fid, "ignore": patterns})
+        return
+
+    table = Table(title=f"[title]Ignore Patterns – {fid}[/title]", box=box.SIMPLE)
+    table.add_column("Pattern", style="value")
+    for p in patterns:
+        table.add_row(p)
+
+    console.print(table)
+
+
+@folders_group.command("edit")
+@click.argument("folder_id")
+@click.option("--label", default=None, help="Set new human-readable label.")
+@click.option("--type", "folder_type", type=click.Choice(["sendreceive", "sendonly", "receiveonly", "receiveencrypted"]), default=None)
+@click.option("--rescan", type=int, default=None, help="Rescan interval in seconds.")
+@click.pass_obj
+def folder_edit(client, folder_id, label, folder_type, rescan):
+    """Update settings of an existing folder."""
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+
+    updated = False
+    if label is not None:
+        folder["label"] = label
+        updated = True
+    if folder_type is not None:
+        folder["type"] = folder_type
+        updated = True
+    if rescan is not None:
+        folder["rescanIntervalS"] = rescan
+        updated = True
+
+    if not updated:
+        console.print("[warn]No options provided to update.[/warn]")
+        return
+
+    try:
+        client.update_folder(fid, folder)
+        console.print(f"[good]✓ Folder [id]{fid}[/id] updated successfully.[/good]")
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to update folder: {e}[/error]")
+        raise SystemExit(1)
 
 
 @folders_group.command("errors")
 @click.argument("folder_id")
-@click.pass_obj
-def folder_errors(client, folder_id):
+@click.pass_context
+def folder_errors(ctx, folder_id):
     """Show sync errors for a folder."""
-    result = client.folder_errors(folder_id)
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+
+    try:
+        result = client.folder_errors(fid)
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to fetch folder errors: {e}[/error]")
+        raise SystemExit(1)
+
     errors = result.get("errors") or []
-    if not errors:
-        console.print(f"[synced]✓ No errors for folder [id]{folder_id}[/id][/synced]")
+    if json_out:
+        print_json({"folder": fid, "errors": errors})
         return
 
-    table = Table(title=f"[error]Errors – {folder_id}[/error]", box=box.SIMPLE)
+    if not errors:
+        console.print(f"[synced]✓ No errors for folder [id]{fid}[/id][/synced]")
+        return
+
+    table = Table(title=f"[error]Errors – {fid}[/error]", box=box.SIMPLE)
     table.add_column("Path",  style="path")
     table.add_column("Error", style="error")
     for e in errors:
@@ -165,17 +337,9 @@ def folder_errors(client, folder_id):
               help="Device ID to share with (repeat for multiple).")
 @click.pass_obj
 def folder_add(client, path, folder_id, label, folder_type, rescan, device_ids):
-    """Add a new folder to Syncthing.
-
-    \b
-    Examples:
-      stcli folders add ~/Documents
-      stcli folders add ~/Photos --label "My Photos" --type sendonly
-      stcli folders add ~/Shared --device DEVICE-ID-1 --device DEVICE-ID-2
-    """
+    """Add a new folder to Syncthing."""
     import os, re
 
-    # Auto-generate ID from basename if not given
     if not folder_id:
         base = os.path.basename(path.rstrip("/"))
         folder_id = re.sub(r"[^a-z0-9\-]", "-", base.lower())[:20]
@@ -183,11 +347,11 @@ def folder_add(client, path, folder_id, label, folder_type, rescan, device_ids):
     if not label:
         label = os.path.basename(path.rstrip("/"))
 
-    # Build device list — always include self
     my_id = client.system_status().get("myID", "")
     devices = [{"deviceID": my_id}]
     for did in device_ids:
-        devices.append({"deviceID": did})
+        dev = resolve_device(client, did)
+        devices.append({"deviceID": dev["deviceID"]})
 
     folder_cfg = {
         "id":            folder_id,
@@ -201,7 +365,7 @@ def folder_add(client, path, folder_id, label, folder_type, rescan, device_ids):
 
     try:
         client.add_folder(folder_cfg)
-    except Exception as e:
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed to add folder: {e}[/error]")
         raise SystemExit(1)
 
@@ -222,38 +386,27 @@ def folder_add(client, path, folder_id, label, folder_type, rescan, device_ids):
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.pass_obj
 def folder_remove(client, folder_id, yes):
-    """Remove a folder from Syncthing (does NOT delete local files).
-
-    \b
-    Example:
-      stcli folders remove my-folder-id
-      stcli folders remove my-folder-id --yes
-    """
-    # Verify it exists
-    folders = {f["id"]: f for f in client.folders()}
-    if folder_id not in folders:
-        console.print(f"[error]✗ Folder '[id]{folder_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
-
-    folder = folders[folder_id]
-    label  = folder.get("label") or folder_id
+    """Remove a folder from Syncthing (does NOT delete local files)."""
+    folder = resolve_folder(client, folder_id)
+    fid    = folder["id"]
+    label  = folder.get("label") or fid
     path   = folder.get("path", "—")
 
     if not yes:
         console.print(
-            f"[warn]⚠  Remove folder [id]{folder_id}[/id] ([value]{label}[/value]) "
+            f"[warn]⚠  Remove folder [id]{fid}[/id] ([value]{label}[/value]) "
             f"at [path]{path}[/path]?[/warn]\n"
             f"[muted]Local files will NOT be deleted.[/muted]"
         )
         click.confirm("Continue?", abort=True)
 
     try:
-        client.remove_folder(folder_id)
-    except Exception as e:
-        console.print(f"[error]✗ Failed: {e}[/error]")
+        client.remove_folder(fid)
+    except SyncthingError as e:
+        console.print(f"[error]✗ Failed to remove folder: {e}[/error]")
         raise SystemExit(1)
 
-    console.print(f"[good]✓ Folder [id]{folder_id}[/id] removed from Syncthing.[/good]")
+    console.print(f"[good]✓ Folder [id]{fid}[/id] removed from Syncthing.[/good]")
 
 
 @folders_group.command("share")
@@ -263,69 +416,40 @@ def folder_remove(client, folder_id, yes):
               help="Encrypt data for this device (receiveencrypted mode).")
 @click.pass_obj
 def folder_share(client, folder_id, device_id, encryption_password):
-    """Share an existing folder with a device.
+    """Share an existing folder with a device."""
+    folder = resolve_folder(client, folder_id)
+    fid    = folder["id"]
+    device = resolve_device(client, device_id)
+    did    = device["deviceID"]
+    device_name = device.get("name") or did[:7] + "…"
 
-    \b
-    The device must already be added to Syncthing.
-    The folder will appear as a pending offer on the remote device.
-
-    \b
-    Examples:
-      stcli folders share my-docs LBKP247-...
-      stcli folders share my-docs LBKP247-... --encryption-password secret
-    """
-    # Resolve full device ID via prefix matching
-    all_devices = client.devices()
-    dev_matches = [d for d in all_devices if d["deviceID"].startswith(device_id)]
-    if not dev_matches:
+    folder_cfg = client.get_folder(fid)
+    existing_ids = {d["deviceID"] for d in folder_cfg.get("devices", [])}
+    if did in existing_ids:
         console.print(
-            f"[error]✗ Device '[id]{device_id}[/id]' not found.[/error]\n"
-            f"[muted]Run [bold]stcli devices list[/bold] to see available devices,\n"
-            f"or [bold]stcli devices add <ID>[/bold] to add it first.[/muted]"
-        )
-        raise SystemExit(1)
-    if len(dev_matches) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(dev_matches)} devices.[/warn]")
-        raise SystemExit(1)
-    full_device_id = dev_matches[0]["deviceID"]
-    device_name    = dev_matches[0].get("name") or full_device_id[:7] + "…"
-
-    # Get the current folder config
-    try:
-        folder = client.get_folder(folder_id)
-    except Exception:
-        console.print(f"[error]✗ Folder '[id]{folder_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
-
-    existing_ids = {d["deviceID"] for d in folder.get("devices", [])}
-    if full_device_id in existing_ids:
-        console.print(
-            f"[warn]⚠  Device [id]{full_device_id[:7]}…[/id] ([value]{device_name}[/value]) "
-            f"is already sharing folder [id]{folder_id}[/id].[/warn]"
+            f"[warn]⚠  Device [id]{did[:7]}…[/id] ([value]{device_name}[/value]) "
+            f"is already sharing folder [id]{fid}[/id].[/warn]"
         )
         return
 
-    # Append the new device entry
-    new_device_entry: dict = {"deviceID": full_device_id}
+    new_device_entry: dict = {"deviceID": did}
     if encryption_password:
         new_device_entry["encryptionPassword"] = encryption_password
 
-    folder["devices"] = folder.get("devices", []) + [new_device_entry]
+    folder_cfg["devices"] = folder_cfg.get("devices", []) + [new_device_entry]
 
     try:
-        client.update_folder(folder_id, folder)
-    except Exception as e:
+        client.update_folder(fid, folder_cfg)
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed to share folder: {e}[/error]")
         raise SystemExit(1)
 
-    label = folder.get("label") or folder_id
+    label = folder_cfg.get("label") or fid
     console.print(Panel(
-        f"[label]Folder :[/label] [id]{folder_id}[/id] ([value]{label}[/value])\n"
-        f"[label]Device :[/label] [id]{full_device_id[:7]}…[/id] ([value]{device_name}[/value])\n"
+        f"[label]Folder :[/label] [id]{fid}[/id] ([value]{label}[/value])\n"
+        f"[label]Device :[/label] [id]{did[:7]}…[/id] ([value]{device_name}[/value])\n"
         f"[label]Encrypt:[/label] [value]{'yes' if encryption_password else 'no'}[/value]\n\n"
-        f"[muted]The remote device will receive a folder offer.\n"
-        f"They must accept it via their Syncthing UI or:\n"
-        f"  stcli pending accept folder {folder_id} --from <their-device-id> --path <path>[/muted]",
+        f"[muted]The remote device will receive a folder offer.[/muted]",
         title="[good]✓ Folder Shared[/good]",
         border_style="green",
         expand=False,
@@ -338,85 +462,65 @@ def folder_share(client, folder_id, device_id, encryption_password):
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.pass_obj
 def folder_unshare(client, folder_id, device_id, yes):
-    """Stop sharing a folder with a device.
+    """Stop sharing a folder with a device."""
+    folder = resolve_folder(client, folder_id)
+    fid    = folder["id"]
+    device = resolve_device(client, device_id)
+    did    = device["deviceID"]
+    device_name = device.get("name") or did[:7] + "…"
 
-    \b
-    Examples:
-      stcli folders unshare my-docs LBKP247-...
-      stcli folders unshare my-docs LBKP247-... --yes
-    """
-    # Resolve full device ID via prefix
-    all_devices = client.devices()
-    dev_matches = [d for d in all_devices if d["deviceID"].startswith(device_id)]
-    if not dev_matches:
-        console.print(f"[error]✗ Device '[id]{device_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
-    if len(dev_matches) > 1:
-        console.print(f"[warn]Ambiguous prefix – matched {len(dev_matches)} devices.[/warn]")
-        raise SystemExit(1)
-    full_device_id = dev_matches[0]["deviceID"]
-    device_name    = dev_matches[0].get("name") or full_device_id[:7] + "…"
-
-    # Get folder config
-    try:
-        folder = client.get_folder(folder_id)
-    except Exception:
-        console.print(f"[error]✗ Folder '[id]{folder_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
-
-    existing = folder.get("devices", [])
-    new_list  = [d for d in existing if d["deviceID"] != full_device_id]
+    folder_cfg = client.get_folder(fid)
+    existing = folder_cfg.get("devices", [])
+    new_list = [d for d in existing if d["deviceID"] != did]
 
     if len(new_list) == len(existing):
         console.print(
-            f"[warn]⚠  Device [id]{full_device_id[:7]}…[/id] is not sharing "
-            f"folder [id]{folder_id}[/id].[/warn]"
+            f"[warn]⚠  Device [id]{did[:7]}…[/id] is not sharing "
+            f"folder [id]{fid}[/id].[/warn]"
         )
         return
 
     if not yes:
         console.print(
-            f"[warn]⚠  Stop sharing folder [id]{folder_id}[/id] with "
-            f"[id]{full_device_id[:7]}…[/id] ([value]{device_name}[/value])?[/warn]"
+            f"[warn]⚠  Stop sharing folder [id]{fid}[/id] with "
+            f"[id]{did[:7]}…[/id] ([value]{device_name}[/value])?[/warn]"
         )
         click.confirm("Continue?", abort=True)
 
-    folder["devices"] = new_list
+    folder_cfg["devices"] = new_list
     try:
-        client.update_folder(folder_id, folder)
-    except Exception as e:
+        client.update_folder(fid, folder_cfg)
+    except SyncthingError as e:
         console.print(f"[error]✗ Failed: {e}[/error]")
         raise SystemExit(1)
 
     console.print(
-        f"[good]✓ Stopped sharing [id]{folder_id}[/id] with "
-        f"[id]{full_device_id[:7]}…[/id] ([value]{device_name}[/value]).[/good]"
+        f"[good]✓ Stopped sharing [id]{fid}[/id] with "
+        f"[id]{did[:7]}…[/id] ([value]{device_name}[/value]).[/good]"
     )
 
 
 @folders_group.command("shares")
 @click.argument("folder_id")
-@click.pass_obj
-def folder_shares(client, folder_id):
-    """List all devices a folder is currently shared with.
+@click.pass_context
+def folder_shares(ctx, folder_id):
+    """List all devices a folder is currently shared with."""
+    client = ctx.obj
+    json_out = ctx.find_root().params.get("json_output", False)
+    folder = resolve_folder(client, folder_id)
+    fid = folder["id"]
+    folder_cfg = client.get_folder(fid)
 
-    \b
-    Example:
-      stcli folders shares my-docs
-    """
-    try:
-        folder = client.get_folder(folder_id)
-    except Exception:
-        console.print(f"[error]✗ Folder '[id]{folder_id}[/id]' not found.[/error]")
-        raise SystemExit(1)
+    label   = folder_cfg.get("label") or fid
+    devices = folder_cfg.get("devices", [])
 
-    label   = folder.get("label") or folder_id
-    devices = folder.get("devices", [])
-
-    # Get known device names
     all_devices = {d["deviceID"]: d.get("name", "") for d in client.devices()}
     my_id = client.system_status().get("myID", "")
     connections = client.system_connections().get("connections", {})
+
+    if json_out:
+        print_json({"folder": fid, "shares": devices})
+        return
 
     table = Table(
         title=f"[title]Shares for 📁 {label}[/title]",
@@ -435,12 +539,9 @@ def folder_shares(client, folder_id):
         did       = entry["deviceID"]
         name      = all_devices.get(did, "(unknown)")
         role      = "[synced]self[/synced]" if did == my_id else "peer"
-        connected = connections.get(did, {}).get("connected", False)
+        connected = connections.get(did, {}).get("connected", False) if isinstance(connections, dict) else False
         conn_str  = "[synced]● yes[/synced]" if connected else "[muted]○ no[/muted]"
         encrypted = "🔒 yes" if entry.get("encryptionPassword") else "no"
         table.add_row(did[:7] + "…", name or "(unnamed)", role, conn_str, encrypted)
 
     console.print(table)
-    console.print(
-        f"\n[muted]To share with another device: [bold]stcli folders share {folder_id} <DEVICE-ID>[/bold][/muted]"
-    )

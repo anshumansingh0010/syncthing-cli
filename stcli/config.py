@@ -131,3 +131,18 @@ def delete_profile(name: str) -> bool:
 def get_profile(name: str = "default") -> Optional[ConnectionProfile]:
     profiles = load_profiles()
     return profiles.get(name)
+
+
+def set_default_profile(name: str) -> bool:
+    profiles = load_profiles()
+    if name not in profiles:
+        return False
+    # If standard name isn't default, clone profile as 'default'
+    default_p = ConnectionProfile.from_dict(profiles[name].to_dict())
+    default_p.name = "default"
+    profiles["default"] = default_p
+    PROFILE_PATH.write_text(
+        json.dumps({n: p.to_dict() for n, p in profiles.items()}, indent=2)
+    )
+    return True
+
