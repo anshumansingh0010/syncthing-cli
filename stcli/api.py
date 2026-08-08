@@ -33,20 +33,55 @@ class SyncthingClient:
         return f"{self.profile.base_url}/rest/{path.lstrip('/')}"
 
     def _get(self, path: str, **params) -> Any:
-        resp = self._session.get(self._url(path), params=params, verify=self._verify, timeout=10)
-        self._raise(resp)
-        return resp.json()
+        try:
+            resp = self._session.get(self._url(path), params=params, verify=self._verify, timeout=10)
+            self._raise(resp)
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            raise SyncthingError(
+                f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
+            ) from e
 
     def _post(self, path: str, json_body: Any = None, **params) -> Any:
-        resp = self._session.post(self._url(path), json=json_body, params=params,
-                                  verify=self._verify, timeout=10)
-        self._raise(resp)
-        return resp.json() if resp.text else {}
+        try:
+            resp = self._session.post(self._url(path), json=json_body, params=params,
+                                      verify=self._verify, timeout=10)
+            self._raise(resp)
+            return resp.json() if resp.text else {}
+        except requests.exceptions.RequestException as e:
+            raise SyncthingError(
+                f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
+            ) from e
 
     def _patch(self, path: str, json_body: Any = None) -> Any:
-        resp = self._session.patch(self._url(path), json=json_body, verify=self._verify, timeout=10)
-        self._raise(resp)
-        return resp.json() if resp.text else {}
+        try:
+            resp = self._session.patch(self._url(path), json=json_body, verify=self._verify, timeout=10)
+            self._raise(resp)
+            return resp.json() if resp.text else {}
+        except requests.exceptions.RequestException as e:
+            raise SyncthingError(
+                f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
+            ) from e
+
+    def _put(self, path: str, json_body: Any = None) -> Any:
+        try:
+            resp = self._session.put(self._url(path), json=json_body, verify=self._verify, timeout=10)
+            self._raise(resp)
+            return resp.json() if resp.text else {}
+        except requests.exceptions.RequestException as e:
+            raise SyncthingError(
+                f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
+            ) from e
+
+    def _delete(self, path: str, **params) -> Any:
+        try:
+            resp = self._session.delete(self._url(path), params=params, verify=self._verify, timeout=10)
+            self._raise(resp)
+            return resp.json() if resp.text else {}
+        except requests.exceptions.RequestException as e:
+            raise SyncthingError(
+                f"Could not connect to Syncthing at {self.profile.base_url}. Is Syncthing running?"
+            ) from e
 
     @staticmethod
     def _raise(resp: requests.Response) -> None:
@@ -165,7 +200,7 @@ class SyncthingClient:
 
     def resume_device(self, device_id: str) -> None:
         q_id = quote(device_id, safe='')
-        self._patch(f"config/devices/{device_id}", {"paused": False})
+        self._patch(f"config/devices/{q_id}", {"paused": False})
 
     # ── Folder CRUD ───────────────────────────────────────────────────────────
 
@@ -181,22 +216,12 @@ class SyncthingClient:
     def update_folder(self, folder_id: str, folder_cfg: dict) -> dict:
         """PUT (full replace) a folder's config."""
         q_id = quote(folder_id, safe='')
-        resp = self._session.put(
-            self._url(f"config/folders/{q_id}"),
-            json=folder_cfg,
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
-        return resp.json() if resp.text else {}
+        return self._put(f"config/folders/{q_id}", json_body=folder_cfg)
 
     def remove_folder(self, folder_id: str) -> None:
         """DELETE a folder from the config."""
         q_id = quote(folder_id, safe='')
-        resp = self._session.delete(
-            self._url(f"config/folders/{q_id}"),
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
+        self._delete(f"config/folders/{q_id}")
 
     # ── Device CRUD ───────────────────────────────────────────────────────────
 
@@ -212,22 +237,12 @@ class SyncthingClient:
     def update_device(self, device_id: str, device_cfg: dict) -> dict:
         """PUT (full replace) a device's config."""
         q_id = quote(device_id, safe='')
-        resp = self._session.put(
-            self._url(f"config/devices/{q_id}"),
-            json=device_cfg,
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
-        return resp.json() if resp.text else {}
+        return self._put(f"config/devices/{q_id}", json_body=device_cfg)
 
     def remove_device(self, device_id: str) -> None:
         """DELETE a device from the config."""
         q_id = quote(device_id, safe='')
-        resp = self._session.delete(
-            self._url(f"config/devices/{q_id}"),
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
+        self._delete(f"config/devices/{q_id}")
 
     # ── Cluster / Pending ─────────────────────────────────────────────────────
 
@@ -238,20 +253,10 @@ class SyncthingClient:
         return self._get("cluster/pending/folders")
 
     def dismiss_pending_device(self, device_id: str) -> None:
-        resp = self._session.delete(
-            self._url("cluster/pending/devices"),
-            params={"device": device_id},
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
+        self._delete("cluster/pending/devices", device=device_id)
 
     def dismiss_pending_folder(self, folder_id: str, device_id: str) -> None:
-        resp = self._session.delete(
-            self._url("cluster/pending/folders"),
-            params={"folder": folder_id, "device": device_id},
-            verify=self._verify, timeout=10,
-        )
-        self._raise(resp)
+        self._delete("cluster/pending/folders", folder=folder_id, device=device_id)
 
     # ── Events (single poll) ──────────────────────────────────────────────────
 

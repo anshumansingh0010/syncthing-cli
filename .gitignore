@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.coverage
+.pytest_cache/
+src/
+pkg/
+dist/
+build/
+*.pkg.tar.zst
+*.tar.gz

@@ -16,16 +16,12 @@ def status_cmd(ctx):
     client = ctx.obj
     json_out = ctx.find_root().params.get("json_output", False)
 
-    try:
-        sys_status   = client.system_status()
-        sys_version  = client.system_version()
-        folders      = client.folders()
-        devices      = client.devices()
-        conns_resp   = client.system_connections()
-        connections  = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
-    except SyncthingError as e:
-        console.print(f"[error]✗ Failed to fetch status: {e}[/error]")
-        raise SystemExit(1)
+    sys_status   = client.system_status()
+    sys_version  = client.system_version()
+    folders      = client.folders()
+    devices      = client.devices()
+    conns_resp   = client.system_connections()
+    connections  = conns_resp.get("connections", {}) if isinstance(conns_resp, dict) else {}
 
     if json_out:
         print_json({

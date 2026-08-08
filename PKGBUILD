@@ -1,7 +1,7 @@
 # Maintainer: Anshuman Singh <your.email@example.com>
 
 pkgname=stcli
-pkgver=1.1.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc="A beautiful CLI for Syncthing"
 arch=('any')
@@ -23,17 +23,17 @@ makedepends=(
 
 # For publishing to AUR, you typically build from a release tarball
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('f088557df104454ff555cebb1c92b6a62e4a127a5bab55cc976fcfe60fbd9971')
+sha256sums=('db8e5f7fa93097ac5b2612db508fa77c1c230b7bc807a9ee39a8f538cdaa0e6f')
 
 build() {
     # If the extracted directory has a different name, update this path
     cd "syncthing-cli-$pkgver"
-    python -m build --wheel --no-isolation
+    /usr/bin/python -m build --wheel --no-isolation
 }
 
 package() {
     cd "syncthing-cli-$pkgver"
-    python -m installer --destdir="$pkgdir" dist/*.whl
+    /usr/bin/python -m installer --destdir="$pkgdir" dist/*.whl
     
     # Optional: Install a license file if you have one
     # install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

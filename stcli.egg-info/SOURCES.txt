@@ -5,6 +5,7 @@ stcli/api.py
 stcli/cli.py
 stcli/config.py
 stcli/output.py
+stcli/resolvers.py
 stcli.egg-info/PKG-INFO
 stcli.egg-info/SOURCES.txt
 stcli.egg-info/dependency_links.txt
@@ -17,3 +18,9 @@ stcli/commands/devices.py
 stcli/commands/folders.py
 stcli/commands/pending.py
 stcli/commands/status.py
+stcli/commands/system.py
+stcli/commands/watch.py
+tests/test_api.py
+tests/test_cli_commands.py
+tests/test_config.py
+tests/test_resolvers.py

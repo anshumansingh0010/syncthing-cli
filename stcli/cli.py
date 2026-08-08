@@ -1,9 +1,10 @@
 """stcli – main Click application."""
 
 import click
+import requests
 from rich.panel import Panel
 
-from stcli.output import console
+from stcli.output import console, print_json
 from stcli.config import detect_profile, get_profile, ConnectionProfile
 from stcli.api import SyncthingClient, SyncthingError
 from stcli.commands.status  import status_cmd
@@ -13,6 +14,29 @@ from stcli.commands.connect import connect_group
 from stcli.commands.pending import pending_cmd
 from stcli.commands.system  import system_group
 from stcli.commands.watch   import watch_cmd, events_cmd
+
+
+class ExceptionHandlingGroup(click.Group):
+    """Custom Click Group that handles connection errors and API exceptions gracefully."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except (SyncthingError, requests.exceptions.RequestException) as e:
+            json_out = ctx.params.get("json_output", False)
+            if json_out:
+                print_json({"error": str(e)})
+            else:
+                console.print(f"[error]✗  {e}[/error]")
+                msg = str(e)
+                if "Could not connect" in msg or "Connection refused" in msg or "Max retries exceeded" in msg:
+                    console.print(
+                        "\n[muted]Tips:\n"
+                        " • Check if Syncthing is running: [bold]systemctl --user status syncthing[/bold] or run [bold]syncthing[/bold]\n"
+                        " • Test connectivity: [bold]stcli connect test[/bold]\n"
+                        " • Auto-detect connection: [bold]stcli connect auto[/bold][/muted]"
+                    )
+            raise SystemExit(1)
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
@@ -69,8 +93,8 @@ def _build_client(ctx: click.Context, profile_name: str, host: str, port: int, a
 
 # ── Root command ──────────────────────────────────────────────────────────────
 
-@click.group()
-@click.version_option("1.1.0", prog_name="stcli")
+@click.group(cls=ExceptionHandlingGroup)
+@click.version_option("1.1.1", prog_name="stcli")
 @click.option("--profile", "profile_name", default="default",
               envvar="STCLI_PROFILE", show_default=True,
               help="Named connection profile to use.")
