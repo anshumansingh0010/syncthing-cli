@@ -20,3 +20,12 @@ stcli = "stcli.cli:cli"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["stcli*"]
+
+[tool.pyright]
+extraPaths = ["."]
+exclude = ["src", "pkg", ".venv"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["src", "pkg", ".venv", "build", "dist"]
+
+
