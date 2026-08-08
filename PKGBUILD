@@ -23,7 +23,7 @@ makedepends=(
 
 # For publishing to AUR, you typically build from a release tarball
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('db8e5f7fa93097ac5b2612db508fa77c1c230b7bc807a9ee39a8f538cdaa0e6f')
+sha256sums=('c86899e082e72ae8044f05e90845ef5c8f235e594a92196c72172245eb4a8e10')
 
 build() {
     # If the extracted directory has a different name, update this path
