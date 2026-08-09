@@ -64,7 +64,7 @@ def test_cli_version():
     runner = CliRunner()
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "1.1.1" in result.output
+    assert "1.1.2" in result.output
 
 
 def test_status_command(mock_client):

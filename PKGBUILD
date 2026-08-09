@@ -22,7 +22,7 @@ makedepends=(
 )
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('9965b6d334ebbc01a1f7a0cc5e1ed2d87099664f033472ba4ff8a3e69e43f27e')
+sha256sums=('52052552cf3d526762b2febab89a418edc6d50de08ef42fa040537cb4620d675')
 
 build() {
     cd "syncthing-cli-$pkgver"

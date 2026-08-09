@@ -99,7 +99,7 @@ def _build_client(ctx: click.Context, profile_name: str, host: str, port: int, a
 # ── Root command ──────────────────────────────────────────────────────────────
 
 @click.group(cls=ExceptionHandlingGroup)
-@click.version_option("1.1.1", prog_name="stcli")
+@click.version_option("1.1.2", prog_name="stcli")
 @click.option("--profile", "profile_name", default="default",
               envvar="STCLI_PROFILE", show_default=True,
               help="Named connection profile to use.")
